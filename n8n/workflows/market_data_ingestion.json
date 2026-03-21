@@ -1,0 +1,383 @@
+{
+  "name": "Market Data Ingestion - Hourly",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "hours",
+              "hoursInterval": 1
+            }
+          ]
+        }
+      },
+      "id": "schedule-trigger",
+      "name": "Hourly Trigger",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [0, 300],
+      "notes": "Runs every hour to fetch fresh market data"
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "https://api.coingecko.com/api/v3/simple/price",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "ids",
+              "value": "={{ $vars.TRACKED_ASSETS || 'bitcoin,ethereum,solana' }}"
+            },
+            {
+              "name": "vs_currencies",
+              "value": "usd"
+            },
+            {
+              "name": "include_24hr_vol",
+              "value": "true"
+            },
+            {
+              "name": "include_last_updated_at",
+              "value": "true"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 30000,
+          "response": {
+            "response": {
+              "fullResponse": false
+            }
+          }
+        }
+      },
+      "id": "coingecko-prices",
+      "name": "CoinGecko Prices",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [250, 200],
+      "notes": "Fetches current prices from CoinGecko API",
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $vars.NEWS_FEED_URL || 'https://cryptopanic.com/api/v1/posts/' }}",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "auth_token",
+              "value": "={{ $vars.NEWS_API_KEY || '' }}"
+            },
+            {
+              "name": "filter",
+              "value": "hot"
+            },
+            {
+              "name": "currencies",
+              "value": "BTC,ETH,SOL"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 30000
+        }
+      },
+      "id": "news-feed",
+      "name": "News Feed",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [250, 400],
+      "notes": "Fetches latest crypto news headlines",
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "// Transform CoinGecko response into rows for asset_prices table\nconst coingeckoData = $input.first().json;\nconst timestamp = new Date().toISOString();\nconst results = [];\n\nfor (const [symbol, data] of Object.entries(coingeckoData)) {\n  results.push({\n    symbol: symbol.toUpperCase(),\n    price: data.usd,\n    volume: data.usd_24h_vol || null,\n    timestamp: data.last_updated_at \n      ? new Date(data.last_updated_at * 1000).toISOString() \n      : timestamp,\n    source: 'coingecko'\n  });\n}\n\nreturn results.map(row => ({ json: row }));"
+      },
+      "id": "normalize-prices",
+      "name": "Normalize Price Data",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [500, 200],
+      "notes": "Transforms CoinGecko JSON into database-ready rows"
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "// Extract headlines from news feed response\n// Supports CryptoPanic format and generic RSS-style feeds\nconst newsData = $input.first().json;\nconst results = [];\n\n// CryptoPanic format\nif (newsData.results && Array.isArray(newsData.results)) {\n  for (const item of newsData.results.slice(0, 50)) {\n    results.push({\n      headline: item.title,\n      source: item.source?.title || item.domain || 'unknown',\n      timestamp: item.published_at || new Date().toISOString(),\n      url: item.url || null\n    });\n  }\n}\n// Generic array format\nelse if (Array.isArray(newsData)) {\n  for (const item of newsData.slice(0, 50)) {\n    results.push({\n      headline: item.title || item.headline,\n      source: item.source || 'unknown',\n      timestamp: item.publishedAt || item.timestamp || new Date().toISOString(),\n      url: item.url || null\n    });\n  }\n}\n\n// Return headlines array for sentiment API\nreturn [{ json: { headlines: results.map(r => r.headline), newsItems: results } }];"
+      },
+      "id": "extract-headlines",
+      "name": "Extract Headlines",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [500, 400],
+      "notes": "Extracts headlines array for sentiment scoring"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://ml-api:8000/v1/sentiment/headlines",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ headlines: $json.headlines }) }}",
+        "options": {
+          "timeout": 60000
+        }
+      },
+      "id": "ml-sentiment",
+      "name": "ML Sentiment API",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [750, 400],
+      "notes": "Scores headlines using the ML API sentiment endpoint",
+      "retryOnFail": true,
+      "maxTries": 2,
+      "waitBetweenTries": 3000
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "// Merge news items with their sentiment scores\nconst inputData = $input.first().json;\nconst sentimentResults = inputData.results || [];\n\n// Get the original news items passed through\nconst prevNode = $('Extract Headlines').first().json;\nconst newsItems = prevNode.newsItems || [];\n\nconst merged = [];\nfor (let i = 0; i < newsItems.length; i++) {\n  const news = newsItems[i];\n  const sentiment = sentimentResults[i] || {};\n  \n  merged.push({\n    headline: news.headline,\n    source: news.source,\n    timestamp: news.timestamp,\n    url: news.url,\n    ai_sentiment_score: sentiment.normalized_score ?? null\n  });\n}\n\nreturn merged.map(row => ({ json: row }));"
+      },
+      "id": "merge-sentiment",
+      "name": "Merge News + Sentiment",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1000, 400],
+      "notes": "Combines news items with their sentiment scores"
+    },
+    {
+      "parameters": {
+        "operation": "insert",
+        "schema": "public",
+        "table": "asset_prices",
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "symbol": "={{ $json.symbol }}",
+            "price": "={{ $json.price }}",
+            "volume": "={{ $json.volume }}",
+            "timestamp": "={{ $json.timestamp }}",
+            "source": "={{ $json.source }}"
+          }
+        },
+        "options": {
+          "onConflict": "nothing"
+        }
+      },
+      "id": "postgres-prices",
+      "name": "Insert Prices",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [750, 200],
+      "credentials": {
+        "postgres": {
+          "id": "REPLACE_WITH_POSTGRES_CREDENTIAL_ID",
+          "name": "PostgreSQL Market DB"
+        }
+      },
+      "notes": "Inserts price data into asset_prices table"
+    },
+    {
+      "parameters": {
+        "operation": "insert",
+        "schema": "public",
+        "table": "market_news",
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "headline": "={{ $json.headline }}",
+            "source": "={{ $json.source }}",
+            "timestamp": "={{ $json.timestamp }}",
+            "url": "={{ $json.url }}",
+            "ai_sentiment_score": "={{ $json.ai_sentiment_score }}"
+          }
+        },
+        "options": {}
+      },
+      "id": "postgres-news",
+      "name": "Insert News",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [1250, 400],
+      "credentials": {
+        "postgres": {
+          "id": "REPLACE_WITH_POSTGRES_CREDENTIAL_ID",
+          "name": "PostgreSQL Market DB"
+        }
+      },
+      "notes": "Inserts enriched news data into market_news table"
+    },
+    {
+      "parameters": {
+        "mode": "combine",
+        "combineBy": "combineAll",
+        "options": {}
+      },
+      "id": "final-merge",
+      "name": "Combine Results",
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3,
+      "position": [1500, 300],
+      "notes": "Combines both insert results for logging"
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "// Log execution summary\nconst pricesInserted = $('Insert Prices').all().length;\nconst newsInserted = $('Insert News').all().length;\n\nreturn [{\n  json: {\n    status: 'success',\n    timestamp: new Date().toISOString(),\n    prices_inserted: pricesInserted,\n    news_inserted: newsInserted\n  }\n}];"
+      },
+      "id": "log-summary",
+      "name": "Log Summary",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1750, 300],
+      "notes": "Logs execution summary for debugging"
+    }
+  ],
+  "connections": {
+    "Hourly Trigger": {
+      "main": [
+        [
+          {
+            "node": "CoinGecko Prices",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "News Feed",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "CoinGecko Prices": {
+      "main": [
+        [
+          {
+            "node": "Normalize Price Data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Normalize Price Data": {
+      "main": [
+        [
+          {
+            "node": "Insert Prices",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "News Feed": {
+      "main": [
+        [
+          {
+            "node": "Extract Headlines",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract Headlines": {
+      "main": [
+        [
+          {
+            "node": "ML Sentiment API",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "ML Sentiment API": {
+      "main": [
+        [
+          {
+            "node": "Merge News + Sentiment",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Merge News + Sentiment": {
+      "main": [
+        [
+          {
+            "node": "Insert News",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Insert Prices": {
+      "main": [
+        [
+          {
+            "node": "Combine Results",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Insert News": {
+      "main": [
+        [
+          {
+            "node": "Combine Results",
+            "type": "main",
+            "index": 1
+          }
+        ]
+      ]
+    },
+    "Combine Results": {
+      "main": [
+        [
+          {
+            "node": "Log Summary",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "saveManualExecutions": true,
+    "saveDataSuccessExecution": "all",
+    "saveDataErrorExecution": "all",
+    "errorWorkflow": "REPLACE_WITH_DEAD_LETTER_WORKFLOW_ID"
+  },
+  "versionId": "market-data-ingestion-v1",
+  "tags": [
+    {
+      "name": "market-intel"
+    },
+    {
+      "name": "ingestion"
+    }
+  ],
+  "meta": {
+    "templateCredsSetupCompleted": false
+  }
+}

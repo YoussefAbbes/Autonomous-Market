@@ -1,0 +1,245 @@
+{
+  "name": "Daily Quality Check",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "0 6 * * *"
+            }
+          ]
+        }
+      },
+      "id": "daily-trigger",
+      "name": "Daily 6AM UTC",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [0, 300],
+      "notes": "Runs daily at 6:00 AM UTC to check data quality"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "-- Data quality metrics for the last 24 hours\nWITH price_stats AS (\n  SELECT \n    COUNT(*) as total_prices,\n    COUNT(DISTINCT symbol) as unique_symbols,\n    MAX(\"timestamp\") as latest_price_ts,\n    EXTRACT(EPOCH FROM (NOW() - MAX(\"timestamp\"))) / 3600 as hours_since_last_price\n  FROM asset_prices\n  WHERE \"timestamp\" >= NOW() - INTERVAL '24 hours'\n),\nnews_stats AS (\n  SELECT \n    COUNT(*) as total_news,\n    COUNT(*) FILTER (WHERE ai_sentiment_score IS NULL) as null_sentiment_count,\n    ROUND(\n      100.0 * COUNT(*) FILTER (WHERE ai_sentiment_score IS NULL) / NULLIF(COUNT(*), 0),\n      2\n    ) as null_sentiment_pct,\n    MAX(\"timestamp\") as latest_news_ts,\n    EXTRACT(EPOCH FROM (NOW() - MAX(\"timestamp\"))) / 3600 as hours_since_last_news\n  FROM market_news\n  WHERE \"timestamp\" >= NOW() - INTERVAL '24 hours'\n)\nSELECT \n  ps.total_prices,\n  ps.unique_symbols,\n  ps.hours_since_last_price,\n  ns.total_news,\n  ns.null_sentiment_count,\n  ns.null_sentiment_pct,\n  ns.hours_since_last_news\nFROM price_stats ps, news_stats ns;",
+        "options": {}
+      },
+      "id": "query-stats",
+      "name": "Query Data Stats",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [250, 300],
+      "credentials": {
+        "postgres": {
+          "id": "REPLACE_WITH_POSTGRES_CREDENTIAL_ID",
+          "name": "PostgreSQL Market DB"
+        }
+      },
+      "notes": "Queries data quality metrics from PostgreSQL"
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "// Analyze data quality and flag issues\nconst stats = $input.first().json;\nconst issues = [];\n\n// Thresholds\nconst STALE_HOURS_THRESHOLD = 2;\nconst NULL_SENTIMENT_PCT_THRESHOLD = 10;\nconst MIN_DAILY_PRICES = 10;\nconst MIN_DAILY_NEWS = 5;\n\n// Check for stale price data\nif (stats.hours_since_last_price > STALE_HOURS_THRESHOLD) {\n  issues.push(`⚠️ Price data is stale: ${stats.hours_since_last_price.toFixed(1)}h since last update`);\n}\n\n// Check for stale news data\nif (stats.hours_since_last_news > STALE_HOURS_THRESHOLD) {\n  issues.push(`⚠️ News data is stale: ${stats.hours_since_last_news.toFixed(1)}h since last update`);\n}\n\n// Check null sentiment rate\nif (stats.null_sentiment_pct > NULL_SENTIMENT_PCT_THRESHOLD) {\n  issues.push(`⚠️ High null sentiment rate: ${stats.null_sentiment_pct}% (${stats.null_sentiment_count} articles)`);\n}\n\n// Check minimum data volume\nif (stats.total_prices < MIN_DAILY_PRICES) {\n  issues.push(`⚠️ Low price volume: only ${stats.total_prices} records in 24h`);\n}\n\nif (stats.total_news < MIN_DAILY_NEWS) {\n  issues.push(`⚠️ Low news volume: only ${stats.total_news} articles in 24h`);\n}\n\n// Build report\nconst hasIssues = issues.length > 0;\nconst report = [\n  `📊 **Daily Data Quality Report**`,\n  ``,\n  `**Timestamp:** ${new Date().toISOString()}`,\n  ``,\n  `**Price Data (24h):**`,\n  `- Total records: ${stats.total_prices}`,\n  `- Unique symbols: ${stats.unique_symbols}`,\n  `- Hours since last: ${(stats.hours_since_last_price || 0).toFixed(1)}`,\n  ``,\n  `**News Data (24h):**`,\n  `- Total articles: ${stats.total_news}`,\n  `- Null sentiment: ${stats.null_sentiment_count} (${stats.null_sentiment_pct || 0}%)`,\n  `- Hours since last: ${(stats.hours_since_last_news || 0).toFixed(1)}`,\n].join('\\n');\n\nconst issueReport = hasIssues \n  ? `\\n\\n**Issues Found:**\\n${issues.join('\\n')}`\n  : `\\n\\n✅ **All checks passed!**`;\n\nreturn [{\n  json: {\n    has_issues: hasIssues,\n    issue_count: issues.length,\n    issues: issues,\n    report: report + issueReport,\n    stats: stats\n  }\n}];"
+      },
+      "id": "check-thresholds",
+      "name": "Check Quality Thresholds",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [500, 300],
+      "notes": "Evaluates metrics against quality thresholds"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "has-issues",
+              "leftValue": "={{ $json.has_issues }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "if-issues",
+      "name": "Has Issues?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [750, 300],
+      "notes": "Routes based on whether issues were found"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "slack-configured",
+              "leftValue": "={{ $vars.SLACK_WEBHOOK_URL }}",
+              "rightValue": "",
+              "operator": {
+                "type": "string",
+                "operation": "notEmpty"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "check-slack-alert",
+      "name": "Slack Configured?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [1000, 200],
+      "notes": "Checks if Slack is configured for alerts"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $vars.SLACK_WEBHOOK_URL }}",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ text: $json.report }) }}",
+        "options": {}
+      },
+      "id": "slack-alert",
+      "name": "Send Slack Alert",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1250, 100],
+      "notes": "Sends quality alert to Slack"
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "// Log issues locally\nconsole.log('DATA QUALITY ISSUES DETECTED:');\nconsole.log($json.report);\nreturn [{ json: { status: 'logged', ...$json } }];"
+      },
+      "id": "log-issues",
+      "name": "Log Issues",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1250, 300],
+      "notes": "Logs issues when no Slack configured"
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "// All checks passed - log success\nconsole.log('Daily quality check passed:', $json.report);\nreturn [{ json: { status: 'all_checks_passed', ...$json } }];"
+      },
+      "id": "log-success",
+      "name": "Log Success",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1000, 400],
+      "notes": "Logs successful check when no issues found"
+    }
+  ],
+  "connections": {
+    "Daily 6AM UTC": {
+      "main": [
+        [
+          {
+            "node": "Query Data Stats",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Query Data Stats": {
+      "main": [
+        [
+          {
+            "node": "Check Quality Thresholds",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check Quality Thresholds": {
+      "main": [
+        [
+          {
+            "node": "Has Issues?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Has Issues?": {
+      "main": [
+        [
+          {
+            "node": "Slack Configured?",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Log Success",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Slack Configured?": {
+      "main": [
+        [
+          {
+            "node": "Send Slack Alert",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Log Issues",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "saveManualExecutions": true,
+    "saveDataSuccessExecution": "all",
+    "saveDataErrorExecution": "all",
+    "errorWorkflow": "REPLACE_WITH_DEAD_LETTER_WORKFLOW_ID"
+  },
+  "versionId": "daily-quality-check-v1",
+  "tags": [
+    {
+      "name": "market-intel"
+    },
+    {
+      "name": "monitoring"
+    }
+  ],
+  "meta": {
+    "templateCredsSetupCompleted": false
+  }
+}

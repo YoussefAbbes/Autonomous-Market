@@ -1,0 +1,145 @@
+{
+  "name": "Dead Letter Handler - Error Notifications",
+  "nodes": [
+    {
+      "parameters": {},
+      "id": "error-trigger",
+      "name": "Error Trigger",
+      "type": "n8n-nodes-base.errorTrigger",
+      "typeVersion": 1,
+      "position": [0, 300],
+      "notes": "Triggered when any workflow with this set as errorWorkflow fails"
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "// Format error details for notification\nconst errorData = $input.first().json;\n\nconst workflowName = errorData.workflow?.name || 'Unknown Workflow';\nconst executionId = errorData.execution?.id || 'N/A';\nconst errorMessage = errorData.execution?.error?.message || 'No error message';\nconst errorNode = errorData.execution?.lastNodeExecuted || 'Unknown';\nconst timestamp = new Date().toISOString();\n\n// Build formatted message\nconst message = [\n  `🚨 **Workflow Failure Alert**`,\n  ``,\n  `**Workflow:** ${workflowName}`,\n  `**Execution ID:** ${executionId}`,\n  `**Failed Node:** ${errorNode}`,\n  `**Error:** ${errorMessage}`,\n  `**Timestamp:** ${timestamp}`,\n  ``,\n  `Check n8n executions for full details.`\n].join('\\n');\n\nreturn [{\n  json: {\n    text: message,\n    workflow_name: workflowName,\n    execution_id: executionId,\n    error_message: errorMessage,\n    error_node: errorNode,\n    timestamp: timestamp\n  }\n}];"
+      },
+      "id": "format-error",
+      "name": "Format Error Message",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [250, 300],
+      "notes": "Formats error details into a readable notification"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "slack-condition",
+              "leftValue": "={{ $vars.SLACK_WEBHOOK_URL }}",
+              "rightValue": "",
+              "operator": {
+                "type": "string",
+                "operation": "notEmpty"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "check-slack",
+      "name": "Slack Configured?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [500, 300],
+      "notes": "Checks if Slack webhook is configured"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $vars.SLACK_WEBHOOK_URL }}",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ text: $json.text }) }}",
+        "options": {}
+      },
+      "id": "slack-notify",
+      "name": "Slack Notification",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [750, 200],
+      "notes": "Sends error notification to Slack webhook"
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "// Log error locally when no notification channel is configured\nconsole.log('ERROR LOGGED (no notification channel configured):');\nconsole.log(JSON.stringify($json, null, 2));\n\nreturn [{ json: { status: 'logged_locally', ...$json } }];"
+      },
+      "id": "local-log",
+      "name": "Log Locally",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [750, 400],
+      "notes": "Fallback: logs error when no webhook is configured"
+    }
+  ],
+  "connections": {
+    "Error Trigger": {
+      "main": [
+        [
+          {
+            "node": "Format Error Message",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Format Error Message": {
+      "main": [
+        [
+          {
+            "node": "Slack Configured?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Slack Configured?": {
+      "main": [
+        [
+          {
+            "node": "Slack Notification",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Log Locally",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": true,
+  "settings": {
+    "executionOrder": "v1",
+    "saveManualExecutions": true,
+    "saveDataSuccessExecution": "all",
+    "saveDataErrorExecution": "all"
+  },
+  "versionId": "dead-letter-handler-v1",
+  "tags": [
+    {
+      "name": "market-intel"
+    },
+    {
+      "name": "error-handling"
+    }
+  ],
+  "meta": {
+    "templateCredsSetupCompleted": true
+  }
+}

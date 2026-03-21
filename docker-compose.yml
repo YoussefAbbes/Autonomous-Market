@@ -1,0 +1,155 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: market-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-market_intel}
+      POSTGRES_USER: ${POSTGRES_USER:-market_user}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-change-me}
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./db/init.sql:/docker-entrypoint-initdb.d/01-init.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-market_user} -d ${POSTGRES_DB:-market_intel}"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+    networks:
+      - market_net
+
+  redis:
+    image: redis:7-alpine
+    container_name: market-redis
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+    networks:
+      - market_net
+
+  n8n:
+    image: n8nio/n8n:latest
+    container_name: market-n8n
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    ports:
+      - "${N8N_PORT:-5678}:5678"
+    environment:
+      # n8n core
+      N8N_HOST: ${N8N_HOST:-localhost}
+      N8N_PORT: 5678
+      N8N_PROTOCOL: ${N8N_PROTOCOL:-http}
+      N8N_ENCRYPTION_KEY: ${N8N_ENCRYPTION_KEY:-replace-with-a-long-random-secret}
+      # Basic auth for self-hosted hardening
+      N8N_BASIC_AUTH_ACTIVE: ${N8N_BASIC_AUTH_ACTIVE:-true}
+      N8N_BASIC_AUTH_USER: ${N8N_BASIC_AUTH_USER:-admin}
+      N8N_BASIC_AUTH_PASSWORD: ${N8N_BASIC_AUTH_PASSWORD:-change-me}
+      # Database backend
+      DB_TYPE: postgresdb
+      DB_POSTGRESDB_HOST: postgres
+      DB_POSTGRESDB_PORT: 5432
+      DB_POSTGRESDB_DATABASE: ${POSTGRES_DB:-market_intel}
+      DB_POSTGRESDB_USER: ${POSTGRES_USER:-market_user}
+      DB_POSTGRESDB_PASSWORD: ${POSTGRES_PASSWORD:-change-me}
+      # Queue mode (recommended for reliability/scale)
+      EXECUTIONS_MODE: queue
+      QUEUE_BULL_REDIS_HOST: redis
+      QUEUE_BULL_REDIS_PORT: 6379
+      QUEUE_BULL_REDIS_DB: 0
+      # Keep payloads and logs for debugging in portfolio phase
+      EXECUTIONS_DATA_SAVE_ON_SUCCESS: all
+      EXECUTIONS_DATA_SAVE_ON_ERROR: all
+      EXECUTIONS_DATA_SAVE_ON_PROGRESS: true
+    volumes:
+      - n8n_data:/home/node/.n8n
+      - ./n8n:/files
+    networks:
+      - market_net
+
+  n8n-worker:
+    image: n8nio/n8n:latest
+    container_name: market-n8n-worker
+    restart: unless-stopped
+    command: ["worker"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      n8n:
+        condition: service_started
+    environment:
+      N8N_ENCRYPTION_KEY: ${N8N_ENCRYPTION_KEY:-replace-with-a-long-random-secret}
+      DB_TYPE: postgresdb
+      DB_POSTGRESDB_HOST: postgres
+      DB_POSTGRESDB_PORT: 5432
+      DB_POSTGRESDB_DATABASE: ${POSTGRES_DB:-market_intel}
+      DB_POSTGRESDB_USER: ${POSTGRES_USER:-market_user}
+      DB_POSTGRESDB_PASSWORD: ${POSTGRES_PASSWORD:-change-me}
+      EXECUTIONS_MODE: queue
+      QUEUE_BULL_REDIS_HOST: redis
+      QUEUE_BULL_REDIS_PORT: 6379
+      QUEUE_BULL_REDIS_DB: 0
+    networks:
+      - market_net
+
+  ml-api:
+    build:
+      context: ./services/ml_api
+    container_name: market-ml-api
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      API_HOST: 0.0.0.0
+      API_PORT: 8000
+      MODEL_NAME: ${ML_API_MODEL_NAME:-distilbert-base-uncased-finetuned-sst-2-english}
+      DATABASE_URL: postgresql://${POSTGRES_USER:-market_user}:${POSTGRES_PASSWORD:-change-me}@postgres:5432/${POSTGRES_DB:-market_intel}
+    ports:
+      - "${ML_API_PORT:-8000}:8000"
+    networks:
+      - market_net
+
+  mcp-server:
+    build:
+      context: ./services/mcp_server
+    container_name: market-mcp-server
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      ml-api:
+        condition: service_started
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER:-market_user}:${POSTGRES_PASSWORD:-change-me}@postgres:5432/${POSTGRES_DB:-market_intel}
+      MCP_TRANSPORT: ${MCP_TRANSPORT:-streamable-http}
+      MCP_HOST: ${MCP_HOST:-0.0.0.0}
+      MCP_PORT: ${MCP_PORT:-8080}
+      MCP_PATH: ${MCP_PATH:-/mcp}
+      ML_API_BASE_URL: http://ml-api:8000
+    ports:
+      - "${MCP_PORT:-8080}:8080"
+    networks:
+      - market_net
+
+networks:
+  market_net:
+    driver: bridge
+
+volumes:
+  postgres_data:
+  redis_data:
+  n8n_data:
