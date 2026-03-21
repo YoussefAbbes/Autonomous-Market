@@ -141,7 +141,7 @@ services:
       MCP_PATH: ${MCP_PATH:-/mcp}
       ML_API_BASE_URL: http://ml-api:8000
     ports:
-      - "${MCP_PORT:-8080}:8080"
+      - "${MCP_PORT:-8080}:${MCP_PORT:-8080}"
     networks:
       - market_net
 

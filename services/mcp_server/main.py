@@ -13,7 +13,7 @@ import asyncio
 import json
 import os
 from datetime import datetime, timezone
-from typing import Any
+from typing import Any, Dict
 
 import asyncpg
 from mcp.server.fastmcp import FastMCP
@@ -127,7 +127,7 @@ async def latest_market_data() -> str:
 
 
 @mcp.tool()
-async def get_market_forecast(symbol: str, horizon_hours: int = 24) -> dict[str, Any]:
+async def get_market_forecast(symbol, horizon_hours=24):
     """
     Tool: get_market_forecast
 
