@@ -27,21 +27,29 @@
         "queryParameters": {
           "parameters": [
             {
-              "name": "ids",
-              "value": "={{ $vars.TRACKED_ASSETS || 'bitcoin,ethereum,solana' }}"
-            },
-            {
-              "name": "vs_currencies",
-              "value": "usd"
-            },
-            {
-              "name": "include_24hr_vol",
-              "value": "true"
-            },
-            {
-              "name": "include_last_updated_at",
-              "value": "true"
-            }
+            "name": "ids",
+            "value": "bitcoin,ethereum,binancecoin,ripple,cardano,solana,polkadot,dogecoin,avalanche-2,chainlink"
+          },
+          {
+            "name": "vs_currencies",
+            "value": "usd,eur,gbp,jpy"
+          },
+          {
+            "name": "include_24hr_vol",
+            "value": "true"
+          },
+          {
+            "name": "include_24hr_change",
+            "value": "true"
+          },
+          {
+            "name": "include_market_cap",
+            "value": "true"
+          },
+          {
+            "name": "include_last_updated_at",
+            "value": "true"
+          }
           ]
         },
         "options": {
@@ -66,21 +74,13 @@
     {
       "parameters": {
         "method": "GET",
-        "url": "={{ $vars.NEWS_FEED_URL || 'https://cryptopanic.com/api/v1/posts/' }}",
+        "url": "https://api.coingecko.com/api/v3/news",
         "sendQuery": true,
         "queryParameters": {
           "parameters": [
             {
-              "name": "auth_token",
-              "value": "={{ $vars.NEWS_API_KEY || '' }}"
-            },
-            {
-              "name": "filter",
-              "value": "hot"
-            },
-            {
-              "name": "currencies",
-              "value": "BTC,ETH,SOL"
+              "name": "page",
+              "value": "1"
             }
           ]
         },
@@ -101,7 +101,7 @@
     {
       "parameters": {
         "mode": "runOnceForAllItems",
-        "jsCode": "// Transform CoinGecko response into rows for asset_prices table\nconst coingeckoData = $input.first().json;\nconst timestamp = new Date().toISOString();\nconst results = [];\n\nfor (const [symbol, data] of Object.entries(coingeckoData)) {\n  results.push({\n    symbol: symbol.toUpperCase(),\n    price: data.usd,\n    volume: data.usd_24h_vol || null,\n    timestamp: data.last_updated_at \n      ? new Date(data.last_updated_at * 1000).toISOString() \n      : timestamp,\n    source: 'coingecko'\n  });\n}\n\nreturn results.map(row => ({ json: row }));"
+        "jsCode": "// Transform CoinGecko response into rows for asset_prices table\n// Supports multiple currencies and additional market data\nconst coingeckoData = $input.first().json;\nconst timestamp = new Date().toISOString();\nconst results = [];\n\nfor (const [symbol, data] of Object.entries(coingeckoData)) {\n  results.push({\n    symbol: symbol.toUpperCase(),\n    price: data.usd || 0,\n    volume: data.usd_24h_vol || null,\n    market_cap: data.usd_market_cap || null,\n    change_24h: data.usd_24h_change || null,\n    price_eur: data.eur || null,\n    price_gbp: data.gbp || null,\n    price_jpy: data.jpy || null,\n    currency: 'usd',\n    timestamp: data.last_updated_at \n      ? new Date(data.last_updated_at * 1000).toISOString() \n      : timestamp,\n    source: 'coingecko'\n  });\n}\n\nreturn results.map(row => ({ json: row }));"
       },
       "id": "normalize-prices",
       "name": "Normalize Price Data",
@@ -113,7 +113,7 @@
     {
       "parameters": {
         "mode": "runOnceForAllItems",
-        "jsCode": "// Extract headlines from news feed response\n// Supports CryptoPanic format and generic RSS-style feeds\nconst newsData = $input.first().json;\nconst results = [];\n\n// CryptoPanic format\nif (newsData.results && Array.isArray(newsData.results)) {\n  for (const item of newsData.results.slice(0, 50)) {\n    results.push({\n      headline: item.title,\n      source: item.source?.title || item.domain || 'unknown',\n      timestamp: item.published_at || new Date().toISOString(),\n      url: item.url || null\n    });\n  }\n}\n// Generic array format\nelse if (Array.isArray(newsData)) {\n  for (const item of newsData.slice(0, 50)) {\n    results.push({\n      headline: item.title || item.headline,\n      source: item.source || 'unknown',\n      timestamp: item.publishedAt || item.timestamp || new Date().toISOString(),\n      url: item.url || null\n    });\n  }\n}\n\n// Return headlines array for sentiment API\nreturn [{ json: { headlines: results.map(r => r.headline), newsItems: results } }];"
+        "jsCode": "// Extract headlines from news feed response\n// Supports multiple news API formats\nconst newsData = $input.first().json;\nconst results = [];\n\n// Helper to convert timestamp to ISO string\nfunction toISOString(timestamp) {\n  if (!timestamp) return new Date().toISOString();\n  // If it's a number (Unix timestamp), convert it\n  if (typeof timestamp === 'number') {\n    return new Date(timestamp * 1000).toISOString();\n  }\n  // If it's already a string, check if it's valid ISO\n  if (typeof timestamp === 'string') {\n    const date = new Date(timestamp);\n    return isNaN(date.getTime()) ? new Date().toISOString() : date.toISOString();\n  }\n  return new Date().toISOString();\n}\n\n// CoinGecko News API format: { data: [...] }\nif (newsData.data && Array.isArray(newsData.data)) {\n  for (const item of newsData.data.slice(0, 50)) {\n    results.push({\n      headline: item.title || item.news || item.description,\n      source: item.author || item.source || 'CoinGecko',\n      timestamp: toISOString(item.updated_at || item.published_at),\n      url: item.url || null\n    });\n  }\n}\n// CryptoPanic format: { results: [...] }\nelse if (newsData.results && Array.isArray(newsData.results)) {\n  for (const item of newsData.results.slice(0, 50)) {\n    results.push({\n      headline: item.title,\n      source: item.source?.title || item.domain || 'unknown',\n      timestamp: toISOString(item.published_at),\n      url: item.url || null\n    });\n  }\n}\n// Generic array format\nelse if (Array.isArray(newsData)) {\n  for (const item of newsData.slice(0, 50)) {\n    results.push({\n      headline: item.title || item.headline,\n      source: item.source || 'unknown',\n      timestamp: toISOString(item.publishedAt || item.timestamp),\n      url: item.url || null\n    });\n  }\n}\n\n// Fallback: If still empty, create a dummy news item to prevent workflow failure\nif (results.length === 0) {\n  results.push({\n    headline: 'No news available - Market data ingestion continues',\n    source: 'system',\n    timestamp: new Date().toISOString(),\n    url: null\n  });\n}\n\n// Return headlines array for sentiment API\nreturn [{ json: { headlines: results.map(r => r.headline), newsItems: results } }];"
       },
       "id": "extract-headlines",
       "name": "Extract Headlines",
@@ -166,6 +166,12 @@
             "symbol": "={{ $json.symbol }}",
             "price": "={{ $json.price }}",
             "volume": "={{ $json.volume }}",
+            "market_cap": "={{ $json.market_cap }}",
+            "change_24h": "={{ $json.change_24h }}",
+            "price_eur": "={{ $json.price_eur }}",
+            "price_gbp": "={{ $json.price_gbp }}",
+            "price_jpy": "={{ $json.price_jpy }}",
+            "currency": "={{ $json.currency }}",
             "timestamp": "={{ $json.timestamp }}",
             "source": "={{ $json.source }}"
           }

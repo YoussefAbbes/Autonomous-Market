@@ -91,7 +91,7 @@
           "conditions": [
             {
               "id": "slack-configured",
-              "leftValue": "={{ $vars.SLACK_WEBHOOK_URL }}",
+              "leftValue": "https://hooks.slack.com/services/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",
               "rightValue": "",
               "operator": {
                 "type": "string",
@@ -113,7 +113,7 @@
     {
       "parameters": {
         "method": "POST",
-        "url": "={{ $vars.SLACK_WEBHOOK_URL }}",
+        "url": "https://hooks.slack.com/services/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",
         "sendBody": true,
         "specifyBody": "json",
         "jsonBody": "={{ JSON.stringify({ text: $json.report }) }}",

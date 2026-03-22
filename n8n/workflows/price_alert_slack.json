@@ -1,0 +1,173 @@
+{
+  "name": "Price Alert Monitor - Slack",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "minutes",
+              "minutesInterval": 15
+            }
+          ]
+        }
+      },
+      "id": "schedule-trigger",
+      "name": "Every 15 Minutes",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [0, 0]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "WITH latest AS (\n  SELECT DISTINCT ON (symbol) \n    symbol, price, timestamp\n  FROM asset_prices\n  ORDER BY symbol, timestamp DESC\n),\nprev AS (\n  SELECT DISTINCT ON (symbol)\n    symbol, price\n  FROM asset_prices\n  WHERE timestamp <= NOW() - INTERVAL '1 hour'\n  ORDER BY symbol, timestamp DESC\n)\nSELECT \n  l.symbol,\n  l.price as current_price,\n  p.price as prev_price,\n  l.timestamp,\n  CASE WHEN p.price > 0 \n    THEN ((l.price - p.price) / p.price * 100)\n    ELSE 0 \n  END as change_pct\nFROM latest l\nLEFT JOIN prev p ON l.symbol = p.symbol\nWHERE p.price IS NOT NULL",
+        "options": {}
+      },
+      "id": "query-prices",
+      "name": "Query Price Changes",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [220, 0],
+      "credentials": {
+        "postgres": {
+          "id": "postgres-market-db",
+          "name": "PostgreSQL Market DB"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Check each asset for significant price changes\nconst items = $input.all();\nconst alerts = [];\nconst threshold = 5; // 5% threshold\n\nfor (const item of items) {\n  const data = item.json;\n  const changePct = parseFloat(data.change_pct) || 0;\n  \n  if (Math.abs(changePct) >= threshold) {\n    const direction = changePct > 0 ? 'spiked' : 'dropped';\n    const emoji = changePct > 0 ? '📈' : '📉';\n    const severity = Math.abs(changePct) >= 10 ? 'critical' : 'warning';\n    \n    alerts.push({\n      json: {\n        symbol: data.symbol,\n        current_price: parseFloat(data.current_price),\n        prev_price: parseFloat(data.prev_price),\n        change_pct: changePct,\n        direction: direction,\n        emoji: emoji,\n        severity: severity,\n        message: `${emoji} *${data.symbol.toUpperCase()}* ${direction} *${Math.abs(changePct).toFixed(2)}%* to $${parseFloat(data.current_price).toLocaleString()}`,\n        should_alert: true\n      }\n    });\n  }\n}\n\n// If no alerts, return a no-op item\nif (alerts.length === 0) {\n  return [{ json: { should_alert: false, message: 'No significant price changes' } }];\n}\n\nreturn alerts;"
+      },
+      "id": "check-threshold",
+      "name": "Check Alert Threshold",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [440, 0]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "condition-alert",
+              "leftValue": "={{ $json.should_alert }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "should-alert",
+      "name": "Should Alert?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [660, 0]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://hooks.slack.com/services/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",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"blocks\": [\n    {\n      \"type\": \"section\",\n      \"text\": {\n        \"type\": \"mrkdwn\",\n        \"text\": \"{{ $json.message }}\"\n      }\n    },\n    {\n      \"type\": \"context\",\n      \"elements\": [\n        {\n          \"type\": \"mrkdwn\",\n          \"text\": \"Previous: ${{ $json.prev_price.toLocaleString() }} | Change: {{ $json.change_pct >= 0 ? '+' : '' }}{{ $json.change_pct.toFixed(2) }}%\"\n        }\n      ]\n    }\n  ]\n}",
+        "options": {}
+      },
+      "id": "send-slack",
+      "name": "Send Slack Alert",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [880, -100]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Log that no alert was needed\nconsole.log('No significant price changes detected');\nreturn $input.all();"
+      },
+      "id": "no-alert",
+      "name": "No Alert Needed",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [880, 100]
+    }
+  ],
+  "connections": {
+    "Every 15 Minutes": {
+      "main": [
+        [
+          {
+            "node": "Query Price Changes",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Query Price Changes": {
+      "main": [
+        [
+          {
+            "node": "Check Alert Threshold",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check Alert Threshold": {
+      "main": [
+        [
+          {
+            "node": "Should Alert?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Should Alert?": {
+      "main": [
+        [
+          {
+            "node": "Send Slack Alert",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "No Alert Needed",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "staticData": null,
+  "tags": [],
+  "triggerCount": 0,
+  "pinData": {}
+}
