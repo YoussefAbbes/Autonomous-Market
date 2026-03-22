@@ -176,6 +176,27 @@ services:
     networks:
       - market_net
 
+  # ML Forecasting Service (for learning and training models)
+  ml-forecast:
+    build:
+      context: ./services/ml_forecast
+    container_name: market-ml-forecast
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_NAME: ${POSTGRES_DB:-market_intel}
+      DB_USER: ${POSTGRES_USER:-market_user}
+      DB_PASSWORD: ${POSTGRES_PASSWORD:-change-me}
+    networks:
+      - market_net
+    # This service runs once and exits (for exploration)
+    # Use: docker-compose run ml-forecast python explore_data.py
+    profiles:
+      - tools  # Only start when explicitly requested
+
 networks:
   market_net:
     driver: bridge
