@@ -208,7 +208,9 @@
             "ai_sentiment_score": "={{ $json.ai_sentiment_score }}"
           }
         },
-        "options": {}
+        "options": {
+          "onConflict": "nothing"
+        }
       },
       "id": "postgres-news",
       "name": "Insert News",
@@ -221,7 +223,7 @@
           "name": "PostgreSQL Market DB"
         }
       },
-      "notes": "Inserts enriched news data into market_news table"
+      "notes": "Inserts enriched news data into market_news table (skips duplicates)"
     },
     {
       "parameters": {
