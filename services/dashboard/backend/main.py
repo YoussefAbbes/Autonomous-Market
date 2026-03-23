@@ -539,6 +539,51 @@ async def get_stats():
         }
 
 
+@app.get("/api/forecast/{symbol}")
+async def get_forecast(symbol: str, horizon_hours: int = 24):
+    """
+    Get ML predictions for a cryptocurrency.
+    Proxies requests to the forecast-api service.
+    """
+    import aiohttp
+
+    forecast_api_url = os.getenv("FORECAST_API_URL", "http://forecast-api:8004")
+
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.post(
+                f"{forecast_api_url}/predict/{symbol.lower()}",
+                params={"horizon_hours": horizon_hours},
+                timeout=aiohttp.ClientTimeout(total=10)
+            ) as response:
+                if response.status == 200:
+                    data = await response.json()
+                    return data
+                elif response.status == 503:
+                    return {
+                        "error": "model_not_trained",
+                        "message": "ML model not trained yet. Train the model first.",
+                        "symbol": symbol
+                    }
+                elif response.status == 404:
+                    return {
+                        "error": "insufficient_data",
+                        "message": f"Not enough data to make predictions for {symbol}",
+                        "symbol": symbol
+                    }
+                else:
+                    error_text = await response.text()
+                    raise HTTPException(status_code=response.status, detail=error_text)
+    except aiohttp.ClientConnectorError:
+        return {
+            "error": "service_unavailable",
+            "message": "Forecast API service is not available. Make sure it's running.",
+            "symbol": symbol
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to get forecast: {str(e)}")
+
+
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=8003)

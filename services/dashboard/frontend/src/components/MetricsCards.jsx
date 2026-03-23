@@ -75,6 +75,9 @@ function MetricsCards({ summary, darkMode, currencySymbol = '$' }) {
 
   const topCoins = getTopCoins()
   const cardBg = darkMode ? 'bg-gray-800' : 'bg-white shadow'
+  const glassCard = darkMode
+    ? 'bg-gray-800/90 backdrop-blur-sm border border-gray-700'
+    : 'bg-white/90 backdrop-blur-sm border border-gray-200 shadow-lg'
   const textMuted = darkMode ? 'text-gray-400' : 'text-gray-500'
   const textSubtle = darkMode ? 'text-gray-500' : 'text-gray-400'
 
@@ -83,7 +86,7 @@ function MetricsCards({ summary, darkMode, currencySymbol = '$' }) {
       {/* Top Coins Row */}
       <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
         {topCoins.map((coin, i) => (
-          <div key={i} className={`${cardBg} rounded-lg p-3 hover:ring-2 hover:ring-blue-500 transition-all cursor-pointer`}>
+          <div key={i} className={`${glassCard} rounded-xl p-3 hover:ring-2 hover:ring-blue-500/50 hover:shadow-xl transition-all duration-300 cursor-pointer transform hover:scale-[1.02]`}>
             <div className="flex items-center gap-2 mb-2">
               <CoinLogo symbol={coin.symbol} size="sm" />
               <div className={`${textMuted} text-xs font-medium uppercase`}>{coin.name}</div>
@@ -107,7 +110,7 @@ function MetricsCards({ summary, darkMode, currencySymbol = '$' }) {
       {/* Stats Row */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
         {/* Sentiment */}
-        <div className={`${cardBg} rounded-lg p-3`}>
+        <div className={`${glassCard} rounded-xl p-3 hover:shadow-xl transition-all duration-300`}>
           <div className="flex items-center gap-2 mb-1">
             <Activity className={`${textMuted}`} size={14} />
             <div className={`${textMuted} text-xs font-medium`}>24H SENTIMENT</div>
@@ -126,7 +129,7 @@ function MetricsCards({ summary, darkMode, currencySymbol = '$' }) {
         </div>
 
         {/* Data Freshness */}
-        <div className={`${cardBg} rounded-lg p-3`}>
+        <div className={`${glassCard} rounded-xl p-3 hover:shadow-xl transition-all duration-300`}>
           <div className="flex items-center gap-2 mb-1">
             <Clock className={`${textMuted}`} size={14} />
             <div className={`${textMuted} text-xs font-medium`}>LAST UPDATE</div>
@@ -145,7 +148,7 @@ function MetricsCards({ summary, darkMode, currencySymbol = '$' }) {
         </div>
 
         {/* Total Coins */}
-        <div className={`${cardBg} rounded-lg p-3`}>
+        <div className={`${glassCard} rounded-xl p-3 hover:shadow-xl transition-all duration-300`}>
           <div className="flex items-center gap-2 mb-1">
             <Coins className={`${textMuted}`} size={14} />
             <div className={`${textMuted} text-xs font-medium`}>TRACKING</div>
@@ -157,7 +160,7 @@ function MetricsCards({ summary, darkMode, currencySymbol = '$' }) {
         </div>
 
         {/* Currency */}
-        <div className={`${cardBg} rounded-lg p-3`}>
+        <div className={`${glassCard} rounded-xl p-3 hover:shadow-xl transition-all duration-300`}>
           <div className="flex items-center gap-2 mb-1">
             <DollarSign className={`${textMuted}`} size={14} />
             <div className={`${textMuted} text-xs font-medium`}>CURRENCY</div>

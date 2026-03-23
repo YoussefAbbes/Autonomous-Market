@@ -37,6 +37,7 @@ function App() {
   const [news, setNews] = useState(null)
   const [alerts, setAlerts] = useState(null)
   const [coins, setCoins] = useState(null)
+  const [forecasts, setForecasts] = useState({})
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
   const [lastUpdate, setLastUpdate] = useState(null)
@@ -49,6 +50,7 @@ function App() {
   const [newsSearch, setNewsSearch] = useState('')
   const [sentimentFilter, setSentimentFilter] = useState('')
   const [activeTab, setActiveTab] = useState('dashboard')
+  const [showForecasts, setShowForecasts] = useState(true)
 
   const currencySymbol = CURRENCIES.find(c => c.code === currency)?.symbol || '$'
 
@@ -69,6 +71,16 @@ function App() {
       setCoins(coinsRes.data)
       setLastUpdate(new Date())
       setError(null)
+
+      // Fetch forecasts for Bitcoin (main coin)
+      try {
+        const forecastRes = await axios.get(`${API_BASE}/forecast/bitcoin?horizon_hours=24`)
+        if (forecastRes.data && !forecastRes.data.error) {
+          setForecasts(prev => ({ ...prev, bitcoin: forecastRes.data }))
+        }
+      } catch (err) {
+        console.log('Forecast not available:', err.message)
+      }
     } catch (err) {
       console.error('Failed to fetch data:', err)
       setError('Failed to connect to API. Is the backend running?')
@@ -218,31 +230,43 @@ function App() {
                 {/* Charts Row */}
                 <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 md:gap-6 mt-6">
                   {/* Price Chart */}
-                  <div className={`lg:col-span-2 ${cardBg} rounded-lg p-4`}>
+                  <div className={`lg:col-span-2 ${cardBg} rounded-xl p-4 backdrop-blur-sm bg-opacity-90 border ${darkMode ? 'border-gray-700' : 'border-gray-200'} shadow-xl`}>
                     <div className="flex justify-between items-center mb-4">
-                      <h2 className="text-lg font-semibold">
+                      <h2 className="text-lg font-semibold bg-gradient-to-r from-blue-400 to-purple-500 bg-clip-text text-transparent">
                         Price Trends ({TIMEFRAMES.find(t => t.value === timeframe)?.label})
                       </h2>
+                      <button
+                        onClick={() => setShowForecasts(!showForecasts)}
+                        className={`px-3 py-1 rounded-lg text-sm font-medium transition-all duration-300 ${
+                          showForecasts
+                            ? 'bg-gradient-to-r from-blue-500 to-purple-600 text-white shadow-lg'
+                            : darkMode ? 'bg-gray-700 text-gray-300 hover:bg-gray-600' : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
+                        }`}
+                      >
+                        {showForecasts ? '🔮 Forecasts ON' : '📊 Forecasts OFF'}
+                      </button>
                     </div>
                     <PriceChart
                       data={prices}
                       darkMode={darkMode}
                       currencySymbol={currencySymbol}
                       selectedCoins={selectedCoins}
+                      forecasts={forecasts}
+                      showForecasts={showForecasts}
                     />
                   </div>
 
                   {/* Right Column */}
                   <div className="space-y-4 md:space-y-6">
                     {/* Sentiment Gauge */}
-                    <div className={`${cardBg} rounded-lg p-4`}>
-                      <h2 className="text-lg font-semibold mb-4">Market Sentiment</h2>
+                    <div className={`${cardBg} rounded-xl p-4 backdrop-blur-sm bg-opacity-90 border ${darkMode ? 'border-gray-700' : 'border-gray-200'} shadow-xl hover:shadow-2xl transition-all duration-300`}>
+                      <h2 className="text-lg font-semibold mb-4 bg-gradient-to-r from-green-400 to-blue-500 bg-clip-text text-transparent">Market Sentiment</h2>
                       <SentimentGauge sentiment={summary?.sentiment} darkMode={darkMode} />
                     </div>
 
                     {/* Quick Stats */}
-                    <div className={`${cardBg} rounded-lg p-4`}>
-                      <h2 className="text-lg font-semibold mb-4">Quick Stats</h2>
+                    <div className={`${cardBg} rounded-xl p-4 backdrop-blur-sm bg-opacity-90 border ${darkMode ? 'border-gray-700' : 'border-gray-200'} shadow-xl hover:shadow-2xl transition-all duration-300`}>
+                      <h2 className="text-lg font-semibold mb-4 bg-gradient-to-r from-purple-400 to-pink-500 bg-clip-text text-transparent">Quick Stats</h2>
                       <div className="space-y-2 text-sm">
                         <div className="flex justify-between">
                           <span className={darkMode ? 'text-gray-400' : 'text-gray-500'}>Coins Tracked</span>

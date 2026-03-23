@@ -176,6 +176,28 @@ services:
     networks:
       - market_net
 
+  # ML Forecast API - Production prediction service
+  forecast-api:
+    build:
+      context: ./services/forecast_api
+    container_name: market-forecast-api
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      DB_HOST: postgres
+      DB_PORT: 5432
+      POSTGRES_DB: ${POSTGRES_DB:-market_intel}
+      POSTGRES_USER: ${POSTGRES_USER:-market_user}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-change-me}
+    ports:
+      - "${FORECAST_API_PORT:-8004}:8004"
+    volumes:
+      - forecast_models:/app/models
+    networks:
+      - market_net
+
   # ML Forecasting Service (for learning and training models)
   ml-forecast:
     build:
@@ -205,3 +227,4 @@ volumes:
   postgres_data:
   redis_data:
   n8n_data:
+  forecast_models:

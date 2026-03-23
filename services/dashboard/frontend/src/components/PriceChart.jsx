@@ -1,10 +1,10 @@
-import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, Legend } from 'recharts'
+import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, Legend, ReferenceDot, Area } from 'recharts'
 
 const COLORS = {
   BITCOIN: '#f7931a',
   ETHEREUM: '#627eea',
   SOLANA: '#9945ff',
-  BINANCECOIN: '#f3ba2f',
+  BANANCECOIN: '#f3ba2f',
   RIPPLE: '#23292f',
   CARDANO: '#0033ad',
   POLKADOT: '#e6007a',
@@ -18,7 +18,7 @@ const DEFAULT_COLORS = [
   '#FFBB28', '#FF8042', '#0088FE', '#00C49F', '#FFBB28'
 ]
 
-function PriceChart({ data, darkMode = true, currencySymbol = '$', selectedCoins = [] }) {
+function PriceChart({ data, darkMode = true, currencySymbol = '$', selectedCoins = [], forecasts = {}, showForecasts = false }) {
   if (!data || !data.symbols || Object.keys(data.symbols).length === 0) {
     return (
       <div className={`text-center py-10 ${darkMode ? 'text-gray-500' : 'text-gray-400'}`}>
@@ -56,6 +56,18 @@ function PriceChart({ data, darkMode = true, currencySymbol = '$', selectedCoins
 
   const chartData = Array.from(timeMap.values())
     .sort((a, b) => a.timestamp - b.timestamp)
+
+  // Add forecast data if available and enabled
+  if (showForecasts && forecasts.bitcoin && forecasts.bitcoin.predictions) {
+    const forecastPoints = forecasts.bitcoin.predictions.map(pred => ({
+      timestamp: new Date(pred.timestamp).getTime(),
+      BITCOIN_FORECAST: pred.price_estimate,
+      forecast: true,
+      confidence: pred.confidence_level
+    }))
+    chartData.push(...forecastPoints)
+    chartData.sort((a, b) => a.timestamp - b.timestamp)
+  }
 
   const formatTime = (timestamp) => {
     const date = new Date(timestamp)
@@ -137,6 +149,19 @@ function PriceChart({ data, darkMode = true, currencySymbol = '$', selectedCoins
             connectNulls={true}
           />
         ))}
+        {/* Forecast Line - dashed purple line for predictions */}
+        {showForecasts && forecasts.bitcoin && (
+          <Line
+            type="monotone"
+            dataKey="BITCOIN_FORECAST"
+            stroke="#a855f7"
+            strokeWidth={2}
+            strokeDasharray="5 5"
+            dot={{ fill: '#a855f7', strokeWidth: 2, r: 4 }}
+            name="BTC Forecast"
+            connectNulls={true}
+          />
+        )}
       </LineChart>
     </ResponsiveContainer>
   )
@@ -153,9 +178,11 @@ function formatCoinName(symbol) {
     'POLKADOT': 'DOT',
     'DOGECOIN': 'DOGE',
     'AVALANCHE-2': 'AVAX',
-    'CHAINLINK': 'LINK'
+    'CHAINLINK': 'LINK',
+    'BITCOIN_FORECAST': '🔮 BTC Forecast',
+    'BTC Forecast': '🔮 BTC Forecast'
   }
-  return names[symbol?.toUpperCase()] || symbol
+  return names[symbol?.toUpperCase()] || names[symbol] || symbol
 }
 
 export default PriceChart
