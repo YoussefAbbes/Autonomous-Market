@@ -119,31 +119,11 @@ The dashboard provides a modern, responsive interface for monitoring cryptocurre
 
 ### Screenshot
 
-```
-+------------------------------------------------------------------+
-|  Autonomous Market Intelligence                    [USD] [Dark]  |
-+------------------------------------------------------------------+
-|                                                                  |
-|   +------------------+  +------------------+  +------------------+|
-|   | Bitcoin          |  | Ethereum         |  | Solana           ||
-|   | $84,532    +2.3% |  | $3,245    +1.8%  |  | $142      -0.5%  ||
-|   +------------------+  +------------------+  +------------------+|
-|                                                                  |
-|   +----------------------------------------------------------+  |
-|   |                    Price Chart                            |  |
-|   |     ____                                      [Forecast]  |  |
-|   |    /    \___      ___/\___                                |  |
-|   |   /          \___/        \___   - - - - (ML Prediction)  |  |
-|   +----------------------------------------------------------+  |
-|                                                                  |
-|   +----------------------------------------------------------+  |
-|   | Latest News                                               |  |
-|   | [+0.72] Bitcoin ETF sees record inflows...                |  |
-|   | [-0.34] Regulatory concerns rise in EU...                 |  |
-|   | [+0.45] Ethereum upgrade scheduled for Q2...              |  |
-|   +----------------------------------------------------------+  |
-+------------------------------------------------------------------+
-```
+![Dashboard Overview](images/screenshot-1.png)
+
+![News Feed View](images/screenshot-2.png)
+
+![Coins Grid View](images/screenshot-3.png)
 
 ## ML Forecasting
 
@@ -217,6 +197,12 @@ Automated data pipelines run via n8n:
 2. Login with credentials from `.env`
 3. Import workflows from `n8n/workflows/` (if provided)
 4. Configure API credentials (CoinGecko, Slack webhooks)
+
+### Workflow Screenshots
+
+![n8n Workflow Editor](images/screenshot-4.png)
+
+![n8n Workflow Executions](images/screenshot-8.png)
 
 ## Project Structure
 
@@ -326,6 +312,18 @@ docker compose logs -f
 # Specific service
 docker compose logs -f forecast-api
 ```
+
+### Infrastructure Snapshot
+
+![Docker Desktop Containers](images/screenshot-5.png)
+
+## Alerting Screenshots
+
+![Slack Alerts Channel - Example 1](images/screenshot-6.png)
+
+![Slack Alerts Channel - Example 2](images/screenshot-7.png)
+
+![Slack Alerts Channel - Example 3](images/screenshot-9.png)
 
 ## Roadmap
 
